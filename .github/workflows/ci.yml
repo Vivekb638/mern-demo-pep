@@ -19,12 +19,12 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: 20.19.0
+          node-version: 24
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -40,6 +40,7 @@ jobs:
   backend:
     name: Backend
     runs-on: ubuntu-latest
+    timeout-minutes: 5
 
     defaults:
       run:
@@ -47,23 +48,39 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: 20.19.0
+          node-version: 24
           cache: npm
           cache-dependency-path: backend/package-lock.json
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Type check
-        run: npx tsc --noEmit
+      - name: Build
+        run: npx tsc
 
       - name: Smoke test API
         run: |
-          npm run dev &
-          npx wait-on http://127.0.0.1:8080
-          curl --fail http://127.0.0.1:8080
+          node dist/index.js &
+          SERVER_PID=$!
+          trap "kill $SERVER_PID" EXIT
+
+          for attempt in {1..30}; do
+            if curl --fail --silent --max-time 2 http://127.0.0.1:8080; then
+              exit 0
+            fi
+
+            if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+              echo "Backend server stopped before it responded."
+              exit 1
+            fi
+
+            sleep 1
+          done
+
+          echo "Backend server did not respond within 30 seconds."
+          exit 1
